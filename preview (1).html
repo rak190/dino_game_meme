@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Meme Dino Runner</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #ffffff;
+      font-family: monospace;
+      color: #535353;
+    }
+
+    .game-wrap {
+      width: min(96vw, 900px);
+    }
+
+    canvas {
+      display: block;
+      width: 100%;
+      height: auto;
+      background: #f7f7f7;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      cursor: pointer;
+      user-select: none;
+      touch-action: manipulation;
+    }
+
+    .hint {
+      margin-top: 12px;
+      text-align: center;
+      font-size: 13px;
+      color: #777;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-wrap">
+    <canvas id="game" width="900" height="260"></canvas>
+    <div class="hint">
+      SPACE / ↑ = jump &nbsp; | &nbsp; ↓ = duck &nbsp; | &nbsp; reach 02300 for the meme ending
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("game");
+    const ctx = canvas.getContext("2d");
+
+    const DPR = window.devicePixelRatio || 1;
+    const CSS_W = 900;
+    const CSS_H = 260;
+    canvas.width = CSS_W * DPR;
+    canvas.height = CSS_H * DPR;
+    canvas.style.width = "100%";
+    canvas.style.maxWidth = CSS_W + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+
+    const dinoImg = new Image();
+    dinoImg.src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADcAAAA6CAYAAAAURcGYAAAA9klEQVR42u2ZUQ6EIAxElXBDzskZ1y+TTZaIsAXa8vgmymOGadHjYNgc56oXp5Q+ks/LOf+wBM/KBWyp1Io1i6pQrnReXNlyBGDUADbKrqQlcMABB9z2cNHCInsLfPAKZr5xroGbPnO1zdrjPve9C9Ideo8dJdZAKdB646ZD2SpQWg/27A8/KPcmUG5VSrumJTjMKZdzPv+tdXsHisXbAHUOOOAWB4q2+uU2UKTuk9Ej1KNyEt0BgbIiUGaHjPvfxsCNsqW0PWcEFsr1qnirU5qHcsBNbL9KdnuyJ8qtVk5jL0qgvC0LLWeqdb5J5UYCurYlw+q4AN9rZonR4+RfAAAAAElFTkSuQmCC";
+
+    const game = {
+      width: 900,
+      height: 260,
+      groundY: 205,
+      state: "ready",
+      tick: 0,
+      score: 0,
+      distance: 0,
+      winDistance: 2300,
+      speed: 6,
+      gravity: 0.72,
+      endingTime: 0,
+      dino: {
+        x: 72,
+        y: 147,
+        w: 55,
+        h: 58,
+        vy: 0,
+        grounded: true,
+        ducking: false
+      },
+      obstacles: [],
+      clouds: [],
+      groundBits: []
+    };
+
+    function rand(min, max) {
+      return min + Math.random() * (max - min);
+    }
+
+    function makeClouds() {
+      return [
+        { x: 140, y: 45, speed: 0.35 },
+        { x: 420, y: 32, speed: 0.28 },
+        { x: 720, y: 64, speed: 0.4 }
+      ];
+    }
+
+    function makeGroundBits() {
+      const bits = [];
+      for (let i = 0; i < 28; i++) {
+        bits.push({
+          x: i * 38 + Math.random() * 24,
+          y: 210 + Math.random() * 17,
+          w: 4 + Math.random() * 12
+        });
+      }
+      return bits;
+    }
+
+    function resetGame(asReady = true) {
+      game.state = asReady ? "ready" : "playing";
+      game.tick = 0;
+      game.score = 0;
+      game.distance = 0;
+      game.speed = 6;
+      game.endingTime = 0;
+      game.obstacles = [];
+      game.clouds = makeClouds();
+      game.groundBits = makeGroundBits();
+      game.dino = {
+        x: 72,
+        y: game.groundY - 58,
+        w: 55,
+        h: 58,
+        vy: 0,
+        grounded: true,
+        ducking: false
+      };
+    }
+
+    function startGame() {
+      resetGame(false);
+    }
+
+    function jump() {
+      if (game.state === "ready" || game.state === "gameover" || game.state === "ending") {
+        startGame();
+        return;
+      }
+
+      if (game.state !== "playing") return;
+
+      if (game.dino.grounded) {
+        game.dino.vy = -13.2;
+        game.dino.grounded = false;
+        game.dino.ducking = false;
+      }
+    }
+
+    function setDuck(value) {
+      if (game.state !== "playing") return;
+      if (game.dino.grounded) game.dino.ducking = value;
+    }
+
+    window.addEventListener("keydown", (event) => {
+      if (["Space", "ArrowUp", "KeyW"].includes(event.code)) {
+        event.preventDefault();
+        jump();
+      }
+
+      if (["ArrowDown", "KeyS"].includes(event.code)) {
+        event.preventDefault();
+        setDuck(true);
+      }
+
+      if (event.code === "Enter" && game.state !== "playing") {
+        event.preventDefault();
+        startGame();
+      }
+    });
+
+    window.addEventListener("keyup", (event) => {
+      if (["ArrowDown", "KeyS"].includes(event.code)) {
+        setDuck(false);
+      }
+    });
+
+    canvas.addEventListener("mousedown", jump);
+    canvas.addEventListener(
+      "touchstart",
+      (event) => {
+        event.preventDefault();
+        jump();
+      },
+      { passive: false }
+    );
+
+    function spawnObstacle() {
+      const last = game.obstacles[game.obstacles.length - 1];
+      const gap = last ? game.width - last.x : 999;
+      if (gap < rand(220, 360) - game.speed * 7) return;
+
+      if (Math.random() > 0.78 && game.score > 280) {
+        game.obstacles.push({
+          type: "bird",
+          x: game.width + 30,
+          y: Math.random() > 0.5 ? 142 : 115,
+          w: 46,
+          h: 26,
+          frame: 0
+        });
+      } else {
+        const tall = Math.random() > 0.5;
+        game.obstacles.push({
+          type: "cactus",
+          x: game.width + 30,
+          y: tall ? 158 : 173,
+          w: tall ? 26 : 20,
+          h: tall ? 47 : 32,
+          cluster: Math.random() > 0.62 ? 2 : 1
+        });
+      }
+    }
+
+    function isColliding(a, b) {
+      return (
+        a.x < b.x + b.w &&
+        a.x + a.w > b.x &&
+        a.y < b.y + b.h &&
+        a.y + a.h > b.y
+      );
+    }
+
+    function update() {
+      game.tick++;
+
+      if (game.state === "playing") {
+        game.score += 0.38;
+        game.distance += game.speed;
+        game.speed = Math.min(14, 6 + game.score / 330);
+
+        const d = game.dino;
+        d.w = d.ducking ? 64 : 55;
+        d.h = d.ducking ? 38 : 58;
+
+        d.vy += game.gravity;
+        d.y += d.vy;
+
+        const floorY = game.groundY - d.h;
+        if (d.y >= floorY) {
+          d.y = floorY;
+          d.vy = 0;
+          d.grounded = true;
+        } else {
+          d.grounded = false;
+        }
+
+        if (game.tick % 42 === 0) spawnObstacle();
+
+        game.obstacles.forEach((obstacle) => {
+          obstacle.x -= game.speed;
+          if (obstacle.type === "bird") {
+            obstacle.frame = Math.floor(game.tick / 10) % 2;
+          }
+        });
+
+        game.obstacles = game.obstacles.filter((obstacle) => obstacle.x > -120);
+
+        game.clouds.forEach((cloud) => {
+          cloud.x -= cloud.speed;
+          if (cloud.x < -90) {
+            cloud.x = game.width + rand(20, 130);
+            cloud.y = rand(30, 75);
+          }
+        });
+
+        game.groundBits.forEach((bit) => {
+          bit.x -= game.speed;
+          if (bit.x < -20) {
+            bit.x = game.width + rand(10, 70);
+            bit.y = 210 + Math.random() * 17;
+            bit.w = 4 + Math.random() * 12;
+          }
+        });
+
+        const dinoBox = {
+          x: d.x + 10,
+          y: d.y + 7,
+          w: d.w - 18,
+          h: d.h - 10
+        };
+
+        for (const obstacle of game.obstacles) {
+          const box =
+            obstacle.type === "bird"
+              ? {
+                  x: obstacle.x + 6,
+                  y: obstacle.y + 5,
+                  w: obstacle.w - 12,
+                  h: obstacle.h - 8
+                }
+              : {
+                  x: obstacle.x,
+                  y: obstacle.y,
+                  w: obstacle.w * obstacle.cluster,
+                  h: obstacle.h
+                };
+
+          if (isColliding(dinoBox, box)) {
+            game.state = "gameover";
+            break;
+          }
+        }
+
+        if (game.distance >= game.winDistance) {
+          game.state = "ending";
+          game.endingTime = 0;
+          game.obstacles = [];
+        }
+      }
+
+      if (game.state === "ending") {
+        game.endingTime++;
+        game.clouds.forEach((cloud) => {
+          cloud.x -= cloud.speed * 0.45;
+          if (cloud.x < -90) cloud.x = game.width + rand(20, 130);
+        });
+      }
+    }
+
+    function rect(x, y, w, h, color = "#535353") {
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+    }
+
+    function drawCloud(cloud) {
+      ctx.strokeStyle = "#9b9b9b";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cloud.x, cloud.y + 18);
+      ctx.lineTo(cloud.x + 10, cloud.y + 18);
+      ctx.lineTo(cloud.x + 16, cloud.y + 10);
+      ctx.lineTo(cloud.x + 27, cloud.y + 10);
+      ctx.lineTo(cloud.x + 34, cloud.y + 4);
+      ctx.lineTo(cloud.x + 47, cloud.y + 4);
+      ctx.lineTo(cloud.x + 55, cloud.y + 12);
+      ctx.lineTo(cloud.x + 68, cloud.y + 12);
+      ctx.lineTo(cloud.x + 76, cloud.y + 18);
+      ctx.lineTo(cloud.x + 88, cloud.y + 18);
+      ctx.stroke();
+    }
+
+    function drawGround() {
+      ctx.strokeStyle = "#535353";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, game.groundY + 1);
+      ctx.lineTo(game.width, game.groundY + 1);
+      ctx.stroke();
+
+      game.groundBits.forEach((bit) => {
+        rect(bit.x, bit.y, bit.w, 2);
+      });
+    }
+
+    function drawCactus(obstacle) {
+      for (let i = 0; i < obstacle.cluster; i++) {
+        const x = obstacle.x + i * (obstacle.w - 3);
+        const y = obstacle.y + (i % 2 ? 8 : 0);
+        const h = obstacle.h - (i % 2 ? 8 : 0);
+
+        rect(x + 8, y, 10, h);
+        rect(x + 2, y + 15, 7, 5);
+        rect(x + 2, y + 15, 5, 17);
+        rect(x + 18, y + 10, 7, 5);
+        rect(x + 21, y + 10, 5, 18);
+      }
+    }
+
+    function drawBird(obstacle) {
+      const x = obstacle.x;
+      const y = obstacle.y;
+
+      rect(x + 16, y + 12, 18, 7);
+      rect(x + 34, y + 15, 10, 4);
+      rect(x + 11, y + 15, 8, 4);
+
+      if (obstacle.frame === 0) {
+        rect(x + 3, y + 5, 20, 5);
+        rect(x + 27, y + 20, 18, 5);
+      } else {
+        rect(x + 4, y + 20, 20, 5);
+        rect(x + 28, y + 5, 18, 5);
+      }
+    }
+
+    function drawDino(x, y, w, h, options = {}) {
+      const flip = options.flip || false;
+      const flower = options.flower || false;
+      const sad = options.sad || false;
+
+      ctx.imageSmoothingEnabled = false;
+
+      if (flip) {
+        ctx.save();
+        ctx.translate(x + w, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(dinoImg, 0, y, w, h);
+        ctx.restore();
+      } else {
+        ctx.drawImage(dinoImg, x, y, w, h);
+      }
+
+      if (flower) {
+        ctx.strokeStyle = "#535353";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x + w - 2, y + h * 0.48);
+        ctx.lineTo(x + w + 24, y + h * 0.32);
+        ctx.stroke();
+
+        rect(x + w + 22, y + h * 0.23, 3, 16);
+        rect(x + w + 16, y + h * 0.29, 14, 3);
+        rect(x + w + 20, y + h * 0.19, 7, 7);
+      }
+
+      if (sad) {
+        ctx.strokeStyle = "#535353";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(x + w * 0.75, y + h * 0.38, 4, Math.PI, Math.PI * 2);
+        ctx.stroke();
+        rect(x + w * 0.66, y + h * 0.43, 2, 9);
+      }
+    }
+
+    function drawScore() {
+      const score = String(Math.floor(game.score)).padStart(5, "0");
+      ctx.fillStyle = "#535353";
+      ctx.textAlign = "right";
+      ctx.font = "bold 18px monospace";
+      ctx.fillText(score, game.width - 34, 34);
+      ctx.font = "12px monospace";
+      ctx.fillText("HI 02300", game.width - 130, 34);
+    }
+
+    function drawReadyText() {
+      ctx.fillStyle = "#535353";
+      ctx.textAlign = "center";
+      ctx.font = "bold 16px monospace";
+      ctx.fillText("PRESS SPACE TO START", game.width / 2, 88);
+      ctx.font = "13px monospace";
+      ctx.fillText("Reach 02300 for the meme ending.", game.width / 2, 112);
+    }
+
+    function drawGameOver() {
+      ctx.fillStyle = "#535353";
+      ctx.textAlign = "center";
+      ctx.font = "bold 19px monospace";
+      ctx.fillText("GAME OVER", game.width / 2, 82);
+
+      ctx.strokeStyle = "#535353";
+      ctx.lineWidth = 2;
+      ctx.strokeRect(game.width / 2 - 14, 98, 28, 24);
+      ctx.beginPath();
+      ctx.moveTo(game.width / 2 - 6, 105);
+      ctx.lineTo(game.width / 2 + 2, 105);
+      ctx.lineTo(game.width / 2 + 2, 101);
+      ctx.lineTo(game.width / 2 + 10, 110);
+      ctx.lineTo(game.width / 2 + 2, 119);
+      ctx.lineTo(game.width / 2 + 2, 115);
+      ctx.lineTo(game.width / 2 - 6, 115);
+      ctx.stroke();
+
+      ctx.font = "13px monospace";
+      ctx.fillText("Press SPACE or ENTER to restart", game.width / 2, 142);
+    }
+
+    function drawBrokenHeart(x, y) {
+      ctx.strokeStyle = "#535353";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(x, y + 8);
+      ctx.bezierCurveTo(x - 22, y - 14, x - 46, y + 12, x, y + 43);
+      ctx.bezierCurveTo(x + 46, y + 12, x + 22, y - 14, x, y + 8);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(x, y + 11);
+      ctx.lineTo(x - 6, y + 22);
+      ctx.lineTo(x + 4, y + 25);
+      ctx.lineTo(x - 2, y + 39);
+      ctx.stroke();
+    }
+
+    function drawEndingScene() {
+      const t = Math.min(1, game.endingTime / 150);
+      const heroX = 72 + t * 220;
+
+      const crushX = 610;
+      const boyfriendX = 690;
+
+      ctx.fillStyle = "#535353";
+      ctx.textAlign = "center";
+      ctx.font = "bold 16px monospace";
+
+      if (game.endingTime < 80) {
+        ctx.fillText("FINAL LEVEL: LOVE CONFESSION", game.width / 2, 58);
+      } else if (game.endingTime < 150) {
+        ctx.fillText("HE BROUGHT A FLOWER...", game.width / 2, 58);
+      } else {
+        ctx.fillText("BUT SHE WAS KISSING ANOTHER DINO", game.width / 2, 58);
+      }
+
+      drawDino(heroX, game.groundY - 58, 55, 58, {
+        flower: true,
+        sad: game.endingTime > 160
+      });
+
+      if (game.endingTime > 80) {
+        /* Crush faces RIGHT */
+        drawDino(crushX, game.groundY - 58, 55, 58, {
+          flip: false
+        });
+
+        /* Boyfriend faces LEFT */
+        drawDino(boyfriendX, game.groundY - 58, 55, 58, {
+          flip: true
+        });
+
+        ctx.fillStyle = "#535353";
+        ctx.textAlign = "center";
+        ctx.font = "bold 28px monospace";
+        ctx.fillText("❤", 678, 145);
+      }
+
+      if (game.endingTime > 160) {
+        drawBrokenHeart(heroX + 92, 104);
+        ctx.fillStyle = "#535353";
+        ctx.font = "13px monospace";
+        ctx.fillText("Press SPACE to replay the pain.", game.width / 2, 238);
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, game.width, game.height);
+      ctx.fillStyle = "#f7f7f7";
+      ctx.fillRect(0, 0, game.width, game.height);
+
+      game.clouds.forEach(drawCloud);
+      drawGround();
+
+      if (game.state === "ending") {
+        drawEndingScene();
+        drawScore();
+        return;
+      }
+
+      drawDino(game.dino.x, game.dino.y, game.dino.w, game.dino.h);
+
+      game.obstacles.forEach((obstacle) => {
+        if (obstacle.type === "bird") drawBird(obstacle);
+        else drawCactus(obstacle);
+      });
+
+      drawScore();
+
+      if (game.state === "ready") drawReadyText();
+      if (game.state === "gameover") drawGameOver();
+    }
+
+    function loop() {
+      update();
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    resetGame(true);
+    dinoImg.onload = loop;
+  </script>
+</body>
+</html>
